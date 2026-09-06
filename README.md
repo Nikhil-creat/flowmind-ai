@@ -26,18 +26,27 @@ Built as a portfolio / major project to demonstrate:
 
 ## Features
 
-- **Document intelligence** — upload PDFs/text files, automatic background chunking + embedding,
-  natural-language Q&A with cited sources, live word-by-word streaming answers over WebSocket
+- **Document intelligence** — upload PDFs, text files, **or images**; automatic background
+  chunking + embedding (images are described via vision AI), natural-language Q&A with
+  cited sources, live word-by-word streaming answers over WebSocket, and **voice input**
+  (browser speech-to-text, no extra setup)
 - **Multi-provider AI** — Claude is the primary reasoning model; Gemini is an automatic
   fallback if Claude errors out or isn't configured, so AI features stay up during a
   single-vendor outage
+- **Multi-step AI agent** — a bounded ReAct-style workflow node that iteratively searches
+  your documents, reasons about what it still needs, and produces a final answer — with
+  every reasoning step logged for inspection
 - **Visual workflow builder** — drag-and-drop canvas (React Flow) with trigger nodes
-  (manual / schedule / webhook) and action nodes (HTTP request, send email, AI summarize,
-  document search, condition)
+  (manual / schedule / webhook) and action nodes: document search, AI summarize, AI agent,
+  send email, **Slack message, WhatsApp message, Google Sheets append**, HTTP request, condition
 - **Automation engine** — topologically executes each workflow's node graph, resolves
   `{{node_id.field}}` template variables between steps, and logs every run
 - **Scheduling & webhooks** — cron-based recurring workflows and a public webhook
   endpoint so external tools (forms, CRMs, cron services) can trigger a workflow
+- **Teams & roles** — every account gets a personal workspace; invite teammates as
+  owner/admin/member, and documents + workflows are shared within the workspace
+- **Billing** — optional Stripe Checkout to upgrade a workspace to "pro" (fully functional
+  once `STRIPE_SECRET_KEY` is set; shows a clear "not configured" message otherwise)
 - **Analytics dashboard** — documents indexed, workflow run history, success/failure
   rates, 7-day activity chart, and a live system-status panel
 - **Auth** — email/password signup and login with JWT bearer tokens, plus one-tap
@@ -54,9 +63,11 @@ Built as a portfolio / major project to demonstrate:
 |----------------|---------------------------------------------------------------------|
 | Frontend       | Next.js 14, TypeScript, Tailwind CSS, React Flow, Recharts           |
 | Backend        | Python, FastAPI, SQLAlchemy, Pydantic                                |
-| AI / RAG       | Anthropic Claude + Google Gemini (auto-fallback), ChromaDB, sentence-transformers |
-| Automation     | Custom DAG workflow engine, APScheduler (cron), webhooks, WebSocket streaming |
-| Auth           | JWT (python-jose) + bcrypt, Google Sign-In (Google Identity Services) |
+| AI / RAG       | Anthropic Claude + Google Gemini (auto-fallback, incl. vision), ChromaDB, sentence-transformers |
+| Automation     | Custom DAG workflow engine + multi-step agent node, APScheduler (cron), webhooks, WebSocket streaming |
+| Integrations   | Slack (webhooks), WhatsApp (Twilio), Google Sheets (service account) |
+| Auth & teams   | JWT (python-jose) + bcrypt, Google Sign-In, workspaces with owner/admin/member roles |
+| Billing        | Stripe Checkout (optional, direct REST integration)                  |
 | Reliability    | Redis (cache + rate limiting, optional), tenacity retries, loguru, Prometheus |
 | Database       | SQLite (dev) / PostgreSQL (production-ready via `DATABASE_URL`)      |
 | Deployment     | Docker + Docker Compose (backend, frontend, Redis)                    |
@@ -158,6 +169,18 @@ sending. Redis and Google Sign-In are optional in the same way.
 4. Copy the Client ID into `backend/.env` as `GOOGLE_CLIENT_ID` **and** into
    `frontend/.env.local` as `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (same value, both places)
 
+## Setting up the optional integrations
+
+Every one of these is optional — the app runs and every feature still works
+(by logging instead of sending) without them.
+
+| Integration | What it needs | Where to get it |
+|---|---|---|
+| Slack messages | `SLACK_DEFAULT_WEBHOOK_URL` (or set per-node) | Slack → Apps → Incoming Webhooks |
+| WhatsApp messages | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | twilio.com/console → WhatsApp sandbox |
+| Google Sheets | `GOOGLE_SERVICE_ACCOUNT_JSON` (path to a service account key file, shared with edit access on the target sheet) | console.cloud.google.com → IAM → Service Accounts |
+| Stripe billing | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID_PRO` | dashboard.stripe.com → Developers → API keys |
+
 ## Reliability & observability
 
 - `GET /health` — basic liveness check
@@ -188,6 +211,26 @@ flowmind-ai/
 │   └── lib/api.ts
 └── docker-compose.yml
 ```
+
+## Testing
+
+```bash
+cd backend
+pip install -r requirements.txt
+pytest -q
+```
+
+Tests cover auth (signup/login/duplicate handling), workspace creation +
+invites + role permissions, the workflow engine (templating, topological
+ordering, condition logic), workflow CRUD + manual run + webhook triggering,
+and the health/metrics endpoints. They run against an isolated in-memory
+SQLite database and don't touch your dev data. The same suite runs
+automatically on every push via GitHub Actions (see the CI badge above).
+
+## Deployment
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for step-by-step instructions to put
+this live on Vercel (frontend) + Render (backend, Postgres, Redis) for free.
 
 ## Roadmap ideas
 

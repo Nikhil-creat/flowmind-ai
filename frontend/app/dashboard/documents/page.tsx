@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Mic, MicOff } from "lucide-react";
 import { documents, DocumentItem } from "@/lib/api";
 
 type ChatTurn = {
@@ -19,15 +20,24 @@ const statusColor: Record<string, string> = {
   failed: "text-coral",
 };
 
+declare global {
+  interface Window {
+    SpeechRecognition?: any;
+    webkitSpeechRecognition?: any;
+  }
+}
+
 export default function DocumentsPage() {
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
+  const [listening, setListening] = useState(false);
   const sessionId = useRef(`session-${Date.now()}`);
   const fileInput = useRef<HTMLInputElement>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   function loadDocs() {
     documents.list().then((res) => setDocs(res.data));
@@ -38,6 +48,33 @@ export default function DocumentsPage() {
     const interval = setInterval(loadDocs, 4000); // pick up background processing status
     return () => clearInterval(interval);
   }, []);
+
+  const speechSupported =
+    typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  function toggleVoiceInput() {
+    if (!speechSupported) return;
+
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setQuestion((q) => (q ? `${q} ${transcript}` : transcript));
+    };
+    recognition.onend = () => setListening(false);
+    recognition.onerror = () => setListening(false);
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+  }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -61,6 +98,7 @@ export default function DocumentsPage() {
     setAsking(true);
 
     const token = typeof window !== "undefined" ? localStorage.getItem("flowmind_token") : null;
+    const workspaceId = typeof window !== "undefined" ? localStorage.getItem("flowmind_workspace_id") : null;
 
     try {
       const socket = new WebSocket(`${WS_URL}/api/documents/chat/stream`);
@@ -72,7 +110,7 @@ export default function DocumentsPage() {
           assistantIndex = c.length;
           return [...c, { role: "assistant", content: "", streaming: true }];
         });
-        socket.send(JSON.stringify({ token, session_id: sessionId.current, message: userMessage }));
+        socket.send(JSON.stringify({ token, workspace_id: workspaceId, session_id: sessionId.current, message: userMessage }));
       };
 
       socket.onmessage = (event) => {
@@ -111,11 +149,17 @@ export default function DocumentsPage() {
     <div className="grid md:grid-cols-2 gap-8">
       <div>
         <h1 className="font-display text-3xl text-ink mb-1">Documents</h1>
-        <p className="text-slatetext mb-6">Upload files to index them for search and Q&A.</p>
+        <p className="text-slatetext mb-6">Upload files or images - both get indexed for search and Q&A.</p>
 
         <label className="btn-primary inline-block cursor-pointer mb-6">
-          {uploading ? "Uploading..." : "Upload document"}
-          <input ref={fileInput} type="file" className="hidden" onChange={handleUpload} accept=".pdf,.txt,.md,.csv" />
+          {uploading ? "Uploading..." : "Upload document or image"}
+          <input
+            ref={fileInput}
+            type="file"
+            className="hidden"
+            onChange={handleUpload}
+            accept=".pdf,.txt,.md,.csv,.png,.jpg,.jpeg,.webp,.gif"
+          />
         </label>
 
         <div className="space-y-3">
@@ -162,7 +206,17 @@ export default function DocumentsPage() {
           {chat.length === 0 && <p className="text-slatetext text-sm">Upload a document, then ask a question about it.</p>}
         </div>
         <form onSubmit={handleAsk} className="flex gap-2">
-          <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask a question..." />
+          <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask a question, or use the mic..." />
+          {speechSupported && (
+            <button
+              type="button"
+              onClick={toggleVoiceInput}
+              className={`shrink-0 rounded-md px-3 border ${listening ? "border-coral text-coral" : "border-mist text-slatetext"}`}
+              title="Voice input"
+            >
+              {listening ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
+          )}
           <button type="submit" disabled={asking} className="btn-primary shrink-0">
             {asking ? "..." : "Ask"}
           </button>

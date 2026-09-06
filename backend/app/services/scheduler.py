@@ -32,7 +32,7 @@ def _execute_scheduled_workflow(workflow_id: str) -> None:
         db.commit()
         db.refresh(run)
 
-        log = run_workflow(wf.definition, user_id=wf.owner_id, trigger_payload={"text": ""})
+        log = run_workflow(wf.definition, workspace_id=wf.workspace_id, trigger_payload={"text": ""})
         run.log = log
         run.status = "success" if all(step["status"] == "success" for step in log) else "failed"
         run.finished_at = datetime.utcnow()

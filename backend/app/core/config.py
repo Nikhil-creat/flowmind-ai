@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     RATE_LIMIT_WORKFLOW_RUN: str = "30/minute"
     CACHE_TTL_SECONDS: int = 300
 
+    # Billing (optional) - Stripe Checkout for upgrading a workspace to "pro"
+    STRIPE_SECRET_KEY: str | None = None
+    STRIPE_PRICE_ID_PRO: str | None = None
+    FRONTEND_URL: str = "http://localhost:3000"
+
+    # Integrations (all optional - workflow nodes log instead of failing if unset)
+    SLACK_DEFAULT_WEBHOOK_URL: str | None = None
+    TWILIO_ACCOUNT_SID: str | None = None
+    TWILIO_AUTH_TOKEN: str | None = None
+    TWILIO_WHATSAPP_FROM: str | None = None  # e.g. "whatsapp:+14155238886"
+    GOOGLE_SERVICE_ACCOUNT_JSON: str | None = None  # path to a service-account JSON file
+
     # Outbound email (used by the workflow "send_email" action node)
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587

@@ -17,14 +17,16 @@ placeholders against prior node outputs, and runs each node's handler.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from app.core.config import get_settings
-from app.services import ai_provider, mailer, rag
+from app.services import ai_provider, mailer, rag, sheets, slack, whatsapp
 
 settings = get_settings()
 
@@ -64,7 +66,52 @@ def _topological_order(nodes: list[dict], edges: list[dict]) -> list[str]:
     return ordered
 
 
-def _run_node(node: dict, context: dict[str, dict[str, Any]], user_id: str, trigger_payload: dict) -> dict[str, Any]:
+def _run_ai_agent(workspace_id: str, goal: str, max_steps: int) -> dict[str, Any]:
+    """A small bounded ReAct-style agent: each step it decides whether to
+    search the workspace's documents again (refining its query) or finish
+    with an answer, up to `max_steps` iterations. Keeps a transcript so the
+    reasoning is inspectable in the run log, not just the final answer."""
+    gathered: list[dict[str, Any]] = []
+    transcript: list[dict[str, Any]] = []
+
+    for step in range(max_steps):
+        context_summary = "\n".join(f"- {c['filename']}: {c['snippet'][:200]}" for c in gathered) or "(nothing yet)"
+        decision_prompt = (
+            "You are an autonomous research agent working toward this goal:\n"
+            f"GOAL: {goal}\n\n"
+            f"Context gathered so far:\n{context_summary}\n\n"
+            f"This is step {step + 1} of {max_steps}. Reply with ONLY a JSON object, no other text:\n"
+            '{"action": "search", "query": "<refined search query>"} to look for more, OR\n'
+            '{"action": "finish", "answer": "<final answer to the goal>"} if you have enough.'
+        )
+        result = ai_provider.generate(decision_prompt, max_tokens=300)
+        raw = result["text"].strip()
+
+        try:
+            # Models sometimes wrap JSON in prose or code fences - extract the object.
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            decision = json.loads(match.group(0)) if match else {}
+        except Exception:  # noqa: BLE001
+            decision = {}
+
+        action = decision.get("action")
+        transcript.append({"step": step + 1, "decision": decision or {"raw": raw}})
+
+        if action == "finish" and decision.get("answer"):
+            return {"output": decision["answer"], "steps": transcript, "ai_provider": result["provider"]}
+
+        query = decision.get("query") or goal
+        hits = rag.search(workspace_id, query, k=3)
+        gathered.extend(hits)
+        if not hits:
+            break
+
+    # Ran out of steps - synthesize the best answer from whatever was gathered.
+    final = rag.generate_answer(goal, gathered)
+    return {"output": final["text"], "steps": transcript, "ai_provider": final["provider"]}
+
+
+def _run_node(node: dict, context: dict[str, dict[str, Any]], workspace_id: str, trigger_payload: dict) -> dict[str, Any]:
     node_type = node["type"]
     data = _resolve_templates(node.get("data", {}), context)
 
@@ -89,9 +136,12 @@ def _run_node(node: dict, context: dict[str, dict[str, Any]], user_id: str, trig
         return {"output": summary, "ai_provider": result["provider"] or "extractive"}
 
     if node_type == "action.document_search":
-        hits = rag.search(user_id, data.get("query", ""), k=data.get("k", 3))
+        hits = rag.search(workspace_id, data.get("query", ""), k=data.get("k", 3))
         joined = "\n".join(h["snippet"] for h in hits)
         return {"output": joined, "hit_count": len(hits)}
+
+    if node_type == "action.ai_agent":
+        return _run_ai_agent(workspace_id, data.get("goal", ""), int(data.get("max_steps", 3)))
 
     if node_type == "action.condition":
         left, op, right = data.get("left"), data.get("op", "=="), data.get("right")
@@ -100,10 +150,25 @@ def _run_node(node: dict, context: dict[str, dict[str, Any]], user_id: str, trig
         passed = ops.get(op, ops["=="])(left, right)
         return {"output": passed, "passed": passed}
 
+    if node_type == "action.slack_message":
+        status = slack.send_message(data.get("webhook_url"), data.get("text", ""))
+        return {"output": status}
+
+    if node_type == "action.whatsapp_message":
+        status = whatsapp.send_whatsapp(data.get("to", ""), data.get("body", ""))
+        return {"output": status}
+
+    if node_type == "action.google_sheets_append":
+        status = sheets.append_row(
+            data.get("spreadsheet_id", ""), data.get("range", "Sheet1!A1"), data.get("values", [])
+        )
+        return {"output": status}
+
+    logger.warning(f"Unknown workflow node type: {node_type}")
     return {"output": None, "error": f"unknown node type: {node_type}"}
 
 
-def run_workflow(definition: dict, user_id: str, trigger_payload: dict | None = None) -> list[dict[str, Any]]:
+def run_workflow(definition: dict, workspace_id: str, trigger_payload: dict | None = None) -> list[dict[str, Any]]:
     """Execute every node in topological order and return a step-by-step log."""
     nodes = {n["id"]: n for n in definition.get("nodes", [])}
     edges = definition.get("edges", [])
@@ -116,7 +181,7 @@ def run_workflow(definition: dict, user_id: str, trigger_payload: dict | None = 
         node = nodes[node_id]
         started = datetime.utcnow().isoformat()
         try:
-            output = _run_node(node, context, user_id, trigger_payload or {})
+            output = _run_node(node, context, workspace_id, trigger_payload or {})
             context[node_id] = output
             log.append({"node_id": node_id, "type": node["type"], "status": "success",
                         "output": output, "started_at": started})

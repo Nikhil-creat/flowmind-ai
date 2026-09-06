@@ -30,7 +30,7 @@ async def trigger_via_webhook(workflow_id: str, request: Request, db: Session = 
     db.commit()
     db.refresh(run)
 
-    log = run_workflow(wf.definition, user_id=wf.owner_id, trigger_payload=payload)
+    log = run_workflow(wf.definition, workspace_id=wf.workspace_id, trigger_payload=payload)
     run.log = log
     run.status = "success" if all(step["status"] == "success" for step in log) else "failed"
     run.finished_at = datetime.utcnow()

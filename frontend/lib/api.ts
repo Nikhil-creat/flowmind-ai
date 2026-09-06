@@ -8,6 +8,8 @@ api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("flowmind_token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
+    const workspaceId = localStorage.getItem("flowmind_workspace_id");
+    if (workspaceId) config.headers["X-Workspace-ID"] = workspaceId;
   }
   return config;
 });
@@ -51,6 +53,22 @@ export type DashboardStats = {
   runs_last_7_days: { date: string; count: number }[];
 };
 
+export type WorkspaceItem = {
+  id: string;
+  name: string;
+  plan: string;
+  role: "owner" | "admin" | "member";
+  created_at: string;
+};
+
+export type MemberItem = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  created_at: string;
+};
+
 export const auth = {
   signup: (data: { full_name: string; email: string; password: string; company?: string }) =>
     api.post("/api/auth/signup", data),
@@ -84,4 +102,16 @@ export const workflows = {
 
 export const analytics = {
   dashboard: () => api.get<DashboardStats>("/api/analytics/dashboard"),
+};
+
+export const workspaces = {
+  list: () => api.get<WorkspaceItem[]>("/api/workspaces"),
+  create: (data: { name: string }) => api.post<WorkspaceItem>("/api/workspaces", data),
+  members: (id: string) => api.get<MemberItem[]>(`/api/workspaces/${id}/members`),
+  invite: (id: string, data: { email: string; role: string }) =>
+    api.post<MemberItem>(`/api/workspaces/${id}/invite`, data),
+  updateRole: (id: string, userId: string, role: string) =>
+    api.put(`/api/workspaces/${id}/members/${userId}`, { role }),
+  removeMember: (id: string, userId: string) => api.delete(`/api/workspaces/${id}/members/${userId}`),
+  checkout: (id: string) => api.post(`/api/workspaces/${id}/billing/checkout`),
 };

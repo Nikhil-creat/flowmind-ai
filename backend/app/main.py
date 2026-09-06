@@ -20,7 +20,7 @@ from app.core import cache
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.limiter import limiter
-from app.routers import analytics, auth, documents, webhooks, workflows
+from app.routers import analytics, auth, documents, webhooks, workflows, workspaces
 from app.services.scheduler import scheduler
 
 settings = get_settings()
@@ -65,6 +65,7 @@ async def observability_middleware(request: Request, call_next):
 
 
 app.include_router(auth.router)
+app.include_router(workspaces.router)
 app.include_router(documents.router)
 app.include_router(workflows.router)
 app.include_router(webhooks.router)

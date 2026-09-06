@@ -1,0 +1,10 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@flowmind_api_url",
+    "NEXT_PUBLIC_WS_URL": "@flowmind_ws_url",
+    "NEXT_PUBLIC_GOOGLE_CLIENT_ID": "@flowmind_google_client_id"
+  }
+}

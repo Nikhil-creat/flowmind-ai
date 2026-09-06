@@ -1,7 +1,7 @@
 """
-Document intelligence engine: extracts text, chunks it, embeds it into a
-per-user Chroma collection, and answers questions with retrieval-augmented
-generation (RAG) using Claude as the reasoning model.
+Document intelligence engine: extracts text (or, for images, a vision-model
+description), chunks it, embeds it into a per-workspace Chroma collection,
+and answers questions with retrieval-augmented generation (RAG).
 """
 from __future__ import annotations
 
@@ -18,22 +18,53 @@ from app.services import ai_provider
 
 settings = get_settings()
 
-_chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
-_embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name=settings.EMBEDDING_MODEL
-)
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+IMAGE_MEDIA_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif",
+}
+
+# Lazily initialized on first real use (not at import time). This makes app
+# startup instant and means the test suite / CI don't need to download the
+# embedding model just to import the module.
+_chroma_client = None
+_embedder = None
 
 
-def _collection_for_user(user_id: str):
-    return _chroma_client.get_or_create_collection(
-        name=f"user_{user_id}", embedding_function=_embedder
-    )
+def _get_client_and_embedder():
+    global _chroma_client, _embedder
+    if _chroma_client is None:
+        _chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
+    if _embedder is None:
+        _embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=settings.EMBEDDING_MODEL
+        )
+    return _chroma_client, _embedder
+
+
+def _collection_for_workspace(workspace_id: str):
+    client, embedder = _get_client_and_embedder()
+    return client.get_or_create_collection(name=f"workspace_{workspace_id}", embedding_function=embedder)
+
+
+def is_image(filename: str) -> bool:
+    return filename.lower().endswith(IMAGE_EXTENSIONS)
 
 
 def extract_text(filename: str, raw_bytes: bytes) -> str:
-    if filename.lower().endswith(".pdf"):
+    lower = filename.lower()
+    if lower.endswith(".pdf"):
         reader = PdfReader(io.BytesIO(raw_bytes))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    if is_image(filename):
+        ext = next(e for e in IMAGE_EXTENSIONS if lower.endswith(e))
+        media_type = IMAGE_MEDIA_TYPES[ext]
+        result = ai_provider.describe_image(raw_bytes, media_type)
+        if result["text"]:
+            return result["text"]
+        return f"[Image file: {filename} - no AI provider configured to describe it]"
+
     # Fall back to plain-text decoding for .txt/.md/.csv etc.
     return raw_bytes.decode("utf-8", errors="ignore")
 
@@ -49,30 +80,31 @@ def chunk_text(text: str, chunk_size: int = 900, overlap: int = 150) -> list[str
     return [c for c in chunks if c.strip()]
 
 
-def index_document(user_id: str, document_id: str, filename: str, text: str) -> int:
-    """Chunk + embed a document's text into the user's vector collection."""
+def index_document(workspace_id: str, document_id: str, filename: str, text: str) -> int:
+    """Chunk + embed a document's text into the workspace's shared vector
+    collection, so any teammate's search can retrieve it."""
     chunks = chunk_text(text)
     if not chunks:
         return 0
-    collection = _collection_for_user(user_id)
+    collection = _collection_for_workspace(workspace_id)
     ids = [f"{document_id}::{i}" for i in range(len(chunks))]
     metadatas = [{"document_id": document_id, "filename": filename} for _ in chunks]
     collection.add(documents=chunks, ids=ids, metadatas=metadatas)
     return len(chunks)
 
 
-def delete_document_vectors(user_id: str, document_id: str) -> None:
-    collection = _collection_for_user(user_id)
+def delete_document_vectors(workspace_id: str, document_id: str) -> None:
+    collection = _collection_for_workspace(workspace_id)
     collection.delete(where={"document_id": document_id})
 
 
-def search(user_id: str, query: str, k: int = 5, document_ids: list[str] | None = None) -> list[dict[str, Any]]:
-    cache_key = f"search:{user_id}:{hash((query, k, tuple(document_ids or [])))}"
+def search(workspace_id: str, query: str, k: int = 5, document_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    cache_key = f"search:{workspace_id}:{hash((query, k, tuple(document_ids or [])))}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    collection = _collection_for_user(user_id)
+    collection = _collection_for_workspace(workspace_id)
     where = {"document_id": {"$in": document_ids}} if document_ids else None
     results = collection.query(query_texts=[query], n_results=k, where=where)
     hits = []

@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal, get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_membership, get_current_user
 from app.core.limiter import limiter
 from app.core.security import decode_access_token
-from app.models.models import ChatMessage, Document, User
+from app.models.models import ChatMessage, Document, User, WorkspaceMember
 from app.models.schemas import ChatRequest, ChatResponse, ChatSource, DocumentOut
 from app.services import rag
 
@@ -18,9 +18,10 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 settings = get_settings()
 
 
-def _process_document(document_id: str, owner_id: str, filename: str, raw: bytes) -> None:
+def _process_document(document_id: str, workspace_id: str, filename: str, raw: bytes) -> None:
     """Runs in the background so upload requests return instantly, even for
-    large files - the frontend polls status via GET /api/documents."""
+    large files (or images going through vision analysis) - the frontend
+    polls status via GET /api/documents."""
     db = SessionLocal()
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
@@ -28,7 +29,7 @@ def _process_document(document_id: str, owner_id: str, filename: str, raw: bytes
             return
         try:
             text = rag.extract_text(filename, raw)
-            chunk_count = rag.index_document(owner_id, document_id, filename, text)
+            chunk_count = rag.index_document(workspace_id, document_id, filename, text)
             doc.chunk_count = chunk_count
             doc.summary = rag.summarize_text(text)
             doc.status = "ready"
@@ -47,9 +48,11 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    membership: WorkspaceMember = Depends(get_current_membership),
 ):
     raw = await file.read()
     doc = Document(
+        workspace_id=membership.workspace_id,
         owner_id=current_user.id,
         filename=file.filename,
         content_type=file.content_type,
@@ -60,26 +63,26 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(_process_document, doc.id, current_user.id, file.filename, raw)
+    background_tasks.add_task(_process_document, doc.id, membership.workspace_id, file.filename, raw)
     return doc
 
 
 @router.get("", response_model=list[DocumentOut])
-def list_documents(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_documents(db: Session = Depends(get_db), membership: WorkspaceMember = Depends(get_current_membership)):
     return (
         db.query(Document)
-        .filter(Document.owner_id == current_user.id)
+        .filter(Document.workspace_id == membership.workspace_id)
         .order_by(Document.created_at.desc())
         .all()
     )
 
 
 @router.delete("/{document_id}")
-def delete_document(document_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    doc = db.query(Document).filter(Document.id == document_id, Document.owner_id == current_user.id).first()
+def delete_document(document_id: str, db: Session = Depends(get_db), membership: WorkspaceMember = Depends(get_current_membership)):
+    doc = db.query(Document).filter(Document.id == document_id, Document.workspace_id == membership.workspace_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    rag.delete_document_vectors(current_user.id, document_id)
+    rag.delete_document_vectors(membership.workspace_id, document_id)
     db.delete(doc)
     db.commit()
     return {"deleted": document_id}
@@ -92,8 +95,9 @@ def chat_with_documents(
     payload: ChatRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    membership: WorkspaceMember = Depends(get_current_membership),
 ):
-    hits = rag.search(current_user.id, payload.message, k=5, document_ids=payload.document_ids)
+    hits = rag.search(membership.workspace_id, payload.message, k=5, document_ids=payload.document_ids)
     result = rag.generate_answer(payload.message, hits)
 
     db.add(ChatMessage(owner_id=current_user.id, session_id=payload.session_id, role="user", content=payload.message))
@@ -116,11 +120,24 @@ def chat_with_documents(
     )
 
 
+def _resolve_workspace_id(user_id: str, requested_workspace_id: str | None) -> str | None:
+    db = SessionLocal()
+    try:
+        query = db.query(WorkspaceMember).filter(WorkspaceMember.user_id == user_id)
+        if requested_workspace_id:
+            m = query.filter(WorkspaceMember.workspace_id == requested_workspace_id).first()
+        else:
+            m = query.order_by(WorkspaceMember.created_at.asc()).first()
+        return m.workspace_id if m else None
+    finally:
+        db.close()
+
+
 @router.websocket("/chat/stream")
 async def chat_stream(websocket: WebSocket):
-    """Real-time chat: client sends {token, session_id, message}, server
-    streams the answer back word-by-word for a live-typing effect, then a
-    final {done: true, sources, ai_provider} message."""
+    """Real-time chat: client sends {token, workspace_id, session_id, message},
+    server streams the answer back word-by-word for a live-typing effect,
+    then a final {done: true, sources, ai_provider} message."""
     await websocket.accept()
     try:
         while True:
@@ -130,8 +147,13 @@ async def chat_stream(websocket: WebSocket):
                 await websocket.send_json({"error": "unauthorized"})
                 continue
 
+            workspace_id = _resolve_workspace_id(user_id, payload.get("workspace_id"))
+            if not workspace_id:
+                await websocket.send_json({"error": "no workspace"})
+                continue
+
             message = payload.get("message", "")
-            hits = rag.search(user_id, message, k=5)
+            hits = rag.search(workspace_id, message, k=5)
             result = rag.generate_answer(message, hits)
 
             words = result["text"].split(" ")

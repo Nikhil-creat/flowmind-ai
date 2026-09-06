@@ -5,7 +5,9 @@ __pycache__/
 venv/
 *.db
 chroma_data/
+test_chroma_data/
 .env
+.pytest_cache/
 
 # Node / Next.js
 node_modules/

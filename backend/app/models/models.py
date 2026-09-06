@@ -25,6 +25,36 @@ class User(Base):
 
     documents = relationship("Document", back_populates="owner", cascade="all, delete-orphan")
     workflows = relationship("Workflow", back_populates="owner", cascade="all, delete-orphan")
+    memberships = relationship("WorkspaceMember", back_populates="user", cascade="all, delete-orphan")
+
+
+class Workspace(Base):
+    """A team/organization container. Documents and workflows belong to a
+    workspace, not directly to a user, so teammates can share them."""
+    __tablename__ = "workspaces"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    name = Column(String, nullable=False)
+    plan = Column(String, default="free")  # free | pro
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="workspace", cascade="all, delete-orphan")
+    workflows = relationship("Workflow", back_populates="workspace", cascade="all, delete-orphan")
+
+
+class WorkspaceMember(Base):
+    """A user's membership + role within a workspace."""
+    __tablename__ = "workspace_members"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    role = Column(String, default="member")  # owner | admin | member
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    workspace = relationship("Workspace", back_populates="members")
+    user = relationship("User", back_populates="memberships")
 
 
 class Document(Base):
@@ -32,7 +62,8 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)  # who uploaded it
     filename = Column(String, nullable=False)
     content_type = Column(String, nullable=True)
     size_bytes = Column(Integer, default=0)
@@ -42,6 +73,7 @@ class Document(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="documents")
+    workspace = relationship("Workspace", back_populates="documents")
 
 
 class ChatMessage(Base):
@@ -62,7 +94,8 @@ class Workflow(Base):
     __tablename__ = "workflows"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)  # who created it
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -71,6 +104,7 @@ class Workflow(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner = relationship("User", back_populates="workflows")
+    workspace = relationship("Workspace", back_populates="workflows")
     runs = relationship("WorkflowRun", back_populates="workflow", cascade="all, delete-orphan")
 
 
