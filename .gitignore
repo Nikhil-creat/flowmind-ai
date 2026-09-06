@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+chroma_data/
+.env
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.env.local
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/

@@ -1,0 +1,40 @@
+{
+  "name": "flowmind-ai-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Workflow Automation + Document Intelligence platform - frontend",
+  "author": {
+    "name": "Nikhil Chary Sriramoju",
+    "email": "sriramojunikhil66@gmail.com",
+    "url": "https://github.com/Nikhil-creat"
+  },
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.2.13",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "reactflow": "^11.11.4",
+    "recharts": "^2.12.7",
+    "axios": "^1.7.7",
+    "jwt-decode": "^4.0.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.446.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2",
+    "@types/node": "^20.16.5",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.12",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.13"
+  }
+}

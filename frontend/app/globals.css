@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background-color: #F8F7FC;
+  color: #14121F;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #E7E4F4;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(11, 14, 26, 0.04);
+}
+
+.btn-primary {
+  background-image: linear-gradient(90deg, #6C4CF1 0%, #8B6CF7 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.65rem 1.2rem;
+  font-weight: 600;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  box-shadow: 0 4px 14px rgba(108, 76, 241, 0.28);
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(108, 76, 241, 0.36);
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  transform: none;
+}
+
+.btn-signal {
+  background-color: #F0A93E;
+  color: #14121F;
+  border-radius: 8px;
+  padding: 0.6rem 1.1rem;
+  font-weight: 600;
+}
+
+.btn-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border: 1px solid #E7E4F4;
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  font-weight: 500;
+  background: #ffffff;
+  width: 100%;
+}
+.btn-google:hover {
+  background: #F8F7FC;
+}
+
+input, textarea {
+  border: 1px solid #E7E4F4;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  background: #ffffff;
+  width: 100%;
+}
+input:focus, textarea:focus {
+  outline: 2px solid #6C4CF1;
+  outline-offset: 1px;
+}
+
+.accent-dot {
+  height: 0.5rem;
+  width: 0.5rem;
+  border-radius: 9999px;
+  display: inline-block;
+}
