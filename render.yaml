@@ -9,10 +9,6 @@ services:
     envVars:
       - key: SECRET_KEY
         generateValue: true
-      - key: DATABASE_URL
-        fromDatabase:
-          name: flowmind-ai-db
-          property: connectionString
       - key: REDIS_URL
         fromService:
           type: redis
@@ -31,7 +27,3 @@ services:
     name: flowmind-ai-redis
     plan: free
     ipAllowList: []
-
-databases:
-  - name: flowmind-ai-db
-    plan: free
