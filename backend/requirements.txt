@@ -29,3 +29,4 @@ tenacity==9.0.0
 
 # Testing (httpx above is also required by TestClient)
 pytest==8.3.3
+email-validator==2.2.0
